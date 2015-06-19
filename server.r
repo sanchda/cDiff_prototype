@@ -62,12 +62,25 @@ bufferDf  = patDf[ 0, ];
 patDf     = patDf[ !((1:nrow(patDf)) %in% replaceIdx),];  # Throw out the ones we just grabbed
                                                           # Is there a better way?
 
-
-for( thisRow in workingDf ) {
-  theseNames = 
-  
-  
+# Addicted to the apply idiom...
+uncombinePatientNames = function(thisRow) {
+  print( thisRow );
+  thesePats  = unlist(strsplit(thisRow[1], ","));
+  thesePats  = gsub("^\\s+","",thesePats);
+  thesePats  = gsub("\\s+$","",thesePats);
+  return( data.frame(patient=thesePats, date=thisRow[2], place=thisRow[3], stringsAsFactors = FALSE) );
 }
+
+# Result is a list of data frames, stitch them together with a do.call to rbind
+answerList = apply( workingDf, 1, uncombinePatientNames );
+bufferDf = do.call(rbind, thisAnswer);
+patDf = rbind(patDf, bufferDf);
+rownames(patDf) = NULL;
+
+# Convert to factor for easier comparison.
+patDf$patient = as.factor( patDf$patient );
+patDf$place   = as.factor( patDf$place   );
+
 
 
 
@@ -92,32 +105,32 @@ getPatientProx = function(thisInputRow, thisPatient) {
 #  } else {
 #    thisRow = as.data.frame(apply( thisInputRow, c(1,2), function(x) gsub(repl2, "", gsub(repl1, "", x)) ), stringsAsFactors =FALSE);
 #  }
-thisRow = thisInputRow;  
+thisRow = thisInputRow;
   # Standard column index; consumes overhead, but whatever
   colIdx = 1:length(thisRow);
-  
+
   # Identifies positions in which there is any patient
   allIdx = colIdx[ (thisRow != "") ];
-  
+
   # Identifies positions in which there is a non-target, non-blank patient
   patIdx = colIdx[ !grepl("^\\s*$", thisRow) & (!grepl(thisPatient, thisRow) | grepl(",", thisRow) ) ];
-  
+
   # Identifies positions in which there is the target patient
   trgIdx = colIdx[ grepl(thisPatient, thisRow) ];
-  
+
   # Identifies when the target and another guy were in the same room at the same time
 #  sIdx = allIdx[ patIdx %in% trgIdx ];
 #  if( length( sIdx ) == 0 ) {
 #    sPats = character(0);
 #  } else {
 #    sPats = unlist( thisRow[ sIdx ] );
-    
+
 #    sPats = unlist(strsplit(sPats, ","));
 #    sPats = gsub("^\\s+","",sPats);
 #    sPats = gsub("\\s+$","",sPats);
 #    sPats = unique(gsub("\\smicro$","",sPats));
 #  }
-  
+
   # Find the left-patients
   dayIdx = length(thisRow):1;
   dayIdx = dayIdx[ allIdx ];
@@ -129,20 +142,20 @@ thisRow = thisInputRow;
   } else {
     lPats = unlist( thisRow[ lIdx ] );
 #    lDays = unlist( lDays );
-    
+
     lPats = unlist(strsplit(lPats, ","));
     lPats = gsub("^\\s+","",lPats);
     lPats = gsub("\\s+$","",lPats);
     lPats = unique(gsub("\\smicro$","",lPats));
-    
+
     if( length(lPats) != length(lDays)) {
       print("NOPE.");
     }
-    
+
     # Expand lDays according to multi-patient days
 #    str_count(XX, ",");
   }
-  
+
   # Find the right-patients
   # Not needed, since every r-patient has this patient as an l-patient
 #  rIdx = allIdx[ c(FALSE, head(allIdx %in% trgIdx, -1) ) ];
@@ -150,19 +163,19 @@ thisRow = thisInputRow;
 #    rPats = character(0);
 #  } else {
 #    rPats = unlist( thisRow[ rIdx ] );
-#    
+#
 #    rPats = unlist(strsplit(rPats, ","));
 #    rPats = gsub("^\\s+","",rPats);
 #    rPats = gsub("\\s+$","",rPats);
 #    rPats = unique(gsub("\\smicro$","",rPats));
 #  }
-  
+
   outList = list();
 #  outList[["samePatients"]]  = sPats;
 #  outList[["rightPatients"]] = rPats;
   outList[["leftPatients"]]  = lPats;
 #  outList[["leftDays"]] = lDays;
-  
+
   return(outList);
 }
 
@@ -187,29 +200,29 @@ for( thisPatient in patients) {
   lIdx  = grep( lNameExpr, adjKeys );
   lPats = unique( adjVals[ lIdx ] );
   lPats = lPats[ !( lPats %in% thisPatient )];
-  
+
   patientMatrix[ patients %in% thisPatient, patients %in% lPats ] = -1.0;
-  
+
   rIdx  = grep( rNameExpr, adjKeys );
   rPats = unique( adjVals[ rIdx ] );
 }
 
 # Define server logic
 shinyServer(function(input, output) {
-  
+
   # Define patient list
   output$choose_pats = renderUI({
-    
+
     # Create checkboxes; have all ticked by default
     checkboxGroupInput("thesePats", "Select patients:", patients, patients)
   });
-  
+
   ### Graph visualization
   output$adjGraph = renderPlot({
     thisAdj = patientMatrix[ patients %in% input$thesePats, patients %in% input$thesePats ];
     patientGraph <- graph.adjacency(thisAdj, mode="directed", weighted=TRUE);
     x = plot.igraph(patientGraph, edge.arrow.size=input$arrowSize, vertex.size = input$vertexSize, vertex.label.cex = input$labelSize);
-    
+
     return(x);
   })
 
