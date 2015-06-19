@@ -1,0 +1,1 @@
+This project is a simple R-shiny interface for visualizing the dynamics of hospital-born infections.  It assumes an input format described in server.r, which is a fairly primitive (albeit standard) way of formatting this data on a patient/roomt/time basis for a fixed infection.
