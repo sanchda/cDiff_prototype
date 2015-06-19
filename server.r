@@ -30,7 +30,7 @@ patients = unique(gsub("\\smicro$","",patients))
 
 
 ## Create a data frame which is indexed by patient and room, whose elements are vectors of dates.
-# First, unzip the dataframe into a 3-column matrix, describing each "patient", room, and date.
+# unzip the input df into a 3-column structure, describing each "patient", room, and date.
 # Null out the empty-string-patients
 # Iterate through the remainder and use that to populate desired data frame
 dateMat = matrix( colnames(roster), nrow = nrow(roster), ncol = ncol(roster) );
@@ -77,7 +77,7 @@ bufferDf = do.call(rbind, thisAnswer);
 patDf = rbind(patDf, bufferDf);
 rownames(patDf) = NULL;
 
-# Convert to factor for easier comparison.
+# Convert to factor for faster comparison, we're done doing string manipulation
 patDf$patient = as.factor( patDf$patient );
 patDf$place   = as.factor( patDf$place   );
 
