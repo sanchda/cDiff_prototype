@@ -208,7 +208,7 @@ shinyServer(function(input, output) {
 
     thisAdj = thisAdj[ apply( thisAdj, 1, sum) > 0, apply( thisAdj, 1, sum) > 0 ];
 
-    patientGraph <- graph.adjacency(thisAdj, mode="directed", weighted=TRUE);
+    patientGraph =  graph.adjacency(thisAdj, mode="directed", weighted=TRUE);
 #    x = plot.igraph(patientGraph, edge.arrow.size=input$arrowSize, vertex.size = input$vertexSize, vertex.label.cex = input$labelSize);
 
     thisLayout = layout.kamada.kawai( patientGraph );
@@ -227,5 +227,6 @@ shinyServer(function(input, output) {
 
     return(x);
   })
+
 
 })
