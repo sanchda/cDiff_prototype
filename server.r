@@ -15,6 +15,7 @@ options(shiny.suppressMissingContextError=TRUE)
 #                - PATIENT1 , PATIENT2
 #                - PATIENT1 micro , PATIENT2
 roster=read.csv("cdiff_apr_2015.csv",quote="\"", stringsAsFactors=FALSE);
+topNames = c("Emma", "Olivia", "Noah", "Sophia", "Liam", "Mason", "Isabella", "Jacob", "William", "Ethan", "Ava", "Michael", "Alexander", "James", "Daniel", "Elijah", "Benjamin", "Logan", "Mia", "Aiden", "Jayden", "Matthew", "Emily", "Jackson", "Lucas", "David", "Joseph", "Abigail", "Anthony", "Andrew", "Samuel", "Gabriel", "Joshua", "John", "Carter", "Luke", "Dylan", "Christopher", "Madison", "Charlotte", "Isaac", "Harper", "Sofia", "Avery", "Elizabeth", "Oliver", "Henry", "Sebastian", "Caleb", "Owen");
 
 # Clear out blank rooms (formatting artifact)
 roster = roster[ apply(roster, 1, function(x) sum( (x != "") + 0)) > 1,];
@@ -31,6 +32,7 @@ patients = gsub("\\s+$","",patients);
 hasMicro = unique(gsub("\\smicro$","",patients[ grep("^.+\\smicro$",patients) ]));
 
 patients = sort( unique(gsub("\\smicro$","",patients)) );
+nameDf   = data.frame(orig=patients, new=topNames[1:length(patients)]);
 
 rooms    = sort(unique( rownames(roster) ) );
 
@@ -81,6 +83,11 @@ answerList = apply( workingDf, 1, uncombinePatientNames );
 bufferDf = do.call(rbind, answerList);
 patDf = rbind(patDf, bufferDf);
 rownames(patDf) = NULL;
+
+# Replace patients, patDf$patient with updated names
+#V(patientGraph)$color = patAdjDf$color[ match( V(patientGraph)$name, patAdjDf$patient ) ];
+
+
 
 # Convert to factor for faster comparison, we're done doing string manipulation
 patDf$patient = as.factor( patDf$patient );
@@ -278,9 +285,9 @@ shinyServer(function(input, output) {
 
     return(selectInput(
       "arr_var",
-      "Arrange by",
+      "Sort patients by",
       choices = var_choices,
-      selected = "name"
+      selected = "community"
     ))
   })
 
@@ -294,7 +301,7 @@ shinyServer(function(input, output) {
       "comm_var",
       "Community Algorithm",
       choices = comm_choices,
-      selected = "walktrap_comm"
+      selected = "optimal_comm"
     ))
   })
 
@@ -420,7 +427,7 @@ shinyServer(function(input, output) {
     patientGraph =  graph.adjacency(thisAdj, mode="directed", weighted=TRUE);
 
     # Create a color ramp function between blue and red
-    red2blue = colorRampPalette(c('red','blue'))
+    red2blue = colorRampPalette(c('red','bisque'))
     theseColors = red2blue( max(patAdjDf$distance) + 1 );
     graphColors = theseColors[ patAdjDf$distance + 1 ];
     patAdjDf$colors = graphColors;
@@ -447,7 +454,13 @@ shinyServer(function(input, output) {
 
   ### Patient summary
   output$patSummary = renderPlot({
-    patList  = input$targetPatients;
+    if( !input$patSummaryToggle ) {
+      patAdjDf = getPatAdjList( input$targetPatients, input$nDisplay );
+      patList  = patAdjDf$patient;
+    } else {
+      patList  = input$targetPatients;
+    }
+
     roomList = input$roomList;
     thisDf   = patDf[ patDf$patient %in% patList, ];
     thisDf   = thisDf[ thisDf$place %in% roomList, ];
@@ -465,7 +478,7 @@ shinyServer(function(input, output) {
   ### Adjacency matrix
   graph = reactive({
     thisAdj = patMat();
-    thisAdj[ thisAdj > input$nDays ] = 0;
+    thisAdj[ thisAdj > input$nDaysAdj ] = 0;
     thisAdj[ thisAdj > 0 ] = 1/thisAdj[ thisAdj > 0];
 
     thisAdj = thisAdj[ apply( thisAdj, 1, sum) > 0, apply( thisAdj, 1, sum) > 0 ];

@@ -20,7 +20,12 @@ shinyUI(fluidPage(
 
       # Simulation configuration
       tabsetPanel(
+          tabPanel("Target",
+            uiOutput("targetPatientsUI")
+          ),
+
         tabPanel("Connectivity",
+
           sliderInput("nDisplay", "Neighborhood order",
             min = 1,
             max = 10,
@@ -36,9 +41,6 @@ shinyUI(fluidPage(
           uiOutput("targetInfectedDate")
         ),
 
-        tabPanel("Target",
-           uiOutput("targetPatientsUI")
-        ),
 
         tabPanel("Viz",
 
@@ -118,26 +120,37 @@ shinyUI(fluidPage(
          uiOutput("graphDisplayOutput")
         ),
         tabPanel("Patient Summary",
-           uiOutput("patDisplayOutput")
-        ),
-
-        tabPanel("Adjacency Matrix",
-          fluidRow(
-          column(6,
-           uiOutput("ordering_choices"),
-           uiOutput("comm_choices")
-          ),
-          column(6,
-            checkboxInput("alpha_weight", "Set alpha by edge weight", FALSE)
-          )),
-          annotate <- conditionalPanel(
-            condition = "output.annotate_vars",
-            checkboxInput("ann_var", "Annotate plot by node attribute sorting", FALSE)
-          ),
-          uiOutput("adjDisplayOutput")
+          checkboxInput("patSummaryToggle", "Manual override (set targets)", FALSE),
+          uiOutput("patDisplayOutput")
         )
+
       )
     )
   )
-  ))
+  ),
+  tabPanel("Adjacency Matrix",
+           fluidRow(
+             column(6,
+                    uiOutput("ordering_choices"),
+                    uiOutput("comm_choices")
+             ),
+             column(6,
+                    checkboxInput("alpha_weight", "Set alpha by edge weight", FALSE),
+                    "Ticking this box will shade the boxes in the adjacency matrix according to the minimum of all durations between which the two patients were in the same room.  Bolder colors indicate that the patients occupied the same room more recently.",
+                    sliderInput("nDaysAdj", "Days since last patient",
+                                min = 1,
+                                max = 30,
+                                value = 2,
+                                step = 1),
+            "This slider modifies the maximum time over which a connection can be drawn between two patients.  For example, if patient A occupied a room 5 days prior to patient B, a connection will be drawn between the patients only if the slider is set to 5 or greater."
+             )),
+           annotate <- conditionalPanel(
+             condition = "output.annotate_vars",
+             checkboxInput("ann_var", "Annotate plot by node attribute sorting", FALSE)
+           ),
+           uiOutput("adjDisplayOutput")
+  )
+
+
+  )
 ))
