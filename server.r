@@ -230,7 +230,7 @@ shinyServer(function(input, output) {
             thatDays = patMatBuild[ colnames( patMatBuild) == thisPatient, colnames( patMatBuild) == thatPatient];
 
             if( thisDays < thatDays ) {
-              patMatBuild[ colnames( patMatBuild) == thisPatient, colnames( patMatBuild) == thatPatient] = thisDays;
+              patMatBuild[ rownames( patMatBuild) == thisPatient, colnames( patMatBuild) == thatPatient] = thisDays;
             }
           }
         }
@@ -247,8 +247,9 @@ shinyServer(function(input, output) {
   output$allPatsUI = renderUI({
     # Create checkboxes; have all ticked by default
     return(
-      list( checkboxGroupInput("patList", "Included patients:", choices=patients, selected=patients, inline=TRUE),
-            checkboxGroupInput("roomList", "Included rooms:", choices=rooms, selected=rooms, inline=TRUE)
+      fluidRow(
+        column(6,   checkboxGroupInput("patList", "Included patients:", choices=patients, selected=patients, inline=FALSE) ),
+        column(6,   checkboxGroupInput("roomList", "Included rooms:", choices=rooms, selected=rooms, inline=FALSE) )
       )
     )
   });
@@ -256,36 +257,157 @@ shinyServer(function(input, output) {
   # Choose the target patient
   output$targetPatientsUI = renderUI({
     # Create checkboxes; have all ticked by default
-    checkboxGroupInput("targetPatients", "Target patients:", choices=input$patList, selected=input$patList[1], inline=TRUE)
+    checkboxGroupInput("targetPatients", "Target patients:", choices=input$patList, selected=input$patList[1], inline=FALSE)
   });
+
+  # Populate a list of infection dates for the target patient
+  output$targetInfectedDate = renderUI({
+
+
+  });
+
+  # Generate a selection menu for ordering choices
+  output$ordering_choices <- renderUI({
+    base <- c(
+      "name",
+      "community"
+    )
+
+    dataset_names <- names(node_list())
+    var_choices <- dataset_names[grep("comm", dataset_names, invert = TRUE)] %>% union(base)
+
+    return(selectInput(
+      "arr_var",
+      "Arrange by",
+      choices = var_choices,
+      selected = "name"
+    ))
+  })
+
+  # Generate a selection menu for community detection choices
+  output$comm_choices <- renderUI({
+
+    dataset_names <- names(node_list())
+    comm_choices <- dataset_names[grep("comm", dataset_names)]
+
+    return(selectInput(
+      "comm_var",
+      "Community Algorithm",
+      choices = comm_choices,
+      selected = "walktrap_comm"
+    ))
+  })
+
+  annotate_vars <- reactive({
+
+    dataset_names <- names(node_list())
+
+    base <- c(
+      "name",
+      "degree",
+      "closeness",
+      "betweenness",
+      "eigen",
+      "walktrap_comm",
+      "edge_comm",
+      "optimal_comm",
+      "spinglass_comm",
+      "fastgreedy_comm"
+    )
+
+    return(setdiff(dataset_names, base))
+
+  })
 
 
   ### Helper function for subsetting
   getPatAdjList = function(adjList, n) {
-    if( n < 1 ) {
-      return( unique(adjList) );
+    # Exploits the fact that adjacency matrix powers correspond to existence of paths
 
+    thisAdj = patMat();
+
+    # thisAdj is weighted by number of days.  Use that to filter,
+    # then renormalized to pure connectivity.
+    thisAdj[ thisAdj > input$nDays ] = 0;
+    thisAdj[ thisAdj > 0 ] = 1;
+    diag(thisAdj) = 1;
+    A = thisAdj;
+
+    neighbors = list();
+
+    # Find the correct rows
+    # Sum up the columns of those rows
+    # Eliminate rows whose sum is trivial (1)
+    # Find the corresponding patient names
+    if( length( adjList ) < 2 ) {
+      matchedPats = colnames(A)[         A[ rownames(A) %in% adjList, ]  > 0 ];
     } else {
-      patList = rownames(patMat());
-      thesePats = patMat()[ patList %in% adjList, ];
-      if( is.null( nrow( thesePats ) ) ) {
-        theseHits = thesePats > 0;
-      } else {
-        theseHits = apply(thesePats,2,sum) > 0;
-      }
-      return( getPatAdjList( unique(c( patList[ theseHits ], adjList )), n-1 ) );
+      matchedPats = colnames(A)[ colSums(A[ rownames(A) %in% adjList, ]) > 0 ];
     }
+
+    if( length( matchedPats ) > 0 ) {
+      neighbors[[1]] = data.frame(patients=matchedPats, distance=1);
+    }
+
+    # If a given row has a nonzero element in a given column
+    # Then there is a connection between the two nodes
+    if( n > 1 ) {
+      for( i in 2:n ) {
+        A = A %*% thisAdj;
+        if( length( adjList ) < 2 ) {
+          matchedPats = colnames(A)[         A[ rownames(A) %in% adjList,]  > 0 ];
+        } else {
+          matchedPats = colnames(A)[ colSums(A[ rownames(A) %in% adjList,]) > 0 ];
+        }
+
+        if( length( matchedPats ) > 0 ) {
+          neighbors[[i]] = data.frame(patients=matchedPats, distance=i);
+        }
+      }
+    }
+
+    # Populate adjList entities for consistency and reusability
+    neighbors[[n+1]] = data.frame(patients=adjList, distance=0);
+
+    # adjOutput$patients are the names of the patients
+    # adjOutput$distances   are the connectivity classes
+    adjOutput = do.call(rbind, neighbors);
+
+    # Keep only the entry with the lowest distance (might be multiple paths)
+    adjOutput = arrange( adjOutput, patients, distance );
+    adjOutput = adjOutput[ !duplicated( adjOutput$patients ), ];
+
+    return( adjOutput );
   }
 
   adjMat = reactive({
-    thesePats = getPatAdjList( input$targetPatients, input$nDisplay );
+
+    # Grab the list of patients for which there is an nDisplay-path from a target patient
+    patAdjDf = getPatAdjList( input$targetPatients, input$nDisplay );
+    thesePats = patAdjDf$patients;
+
+    # Grab the distance-weighted adjacency matrix, patMat()
     thisAdj = patMat();
+
+    # If day threshold is exceeded, drop it
     thisAdj[ thisAdj > input$nDays ] = 0;
+
+    # Include only rows and columns which are a target patient or a connected patient
+    # (target patients implicitly returned from getPatAdjList)
     thisAdj = thisAdj[ (rownames(thisAdj) %in% thesePats), (colnames(thisAdj) %in% thesePats) ];
+
+    # Weight according to inverse of days since
     thisAdj[ thisAdj > 0 ] = 1/thisAdj[ thisAdj > 0];
 
-    thisAdj = thisAdj[ apply( thisAdj, 1, sum) > 0, apply( thisAdj, 1, sum) > 0 ];
+    # The filtering above can strip out the matrix structure if the result is a scalar
+    # Recast and rename.  Thanks R.
+    if( class( thisAdj ) == "numeric" ) {
+      thisAdj = as.matrix( thisAdj );
+      colnames( thisAdj ) = thesePats;
+      rownames( thisAdj ) = thesePats;
+    }
 
+    # Remove self-connections
     thisAdj[ row(thisAdj) == col(thisAdj) ] = 0;
     return( thisAdj );
   });
@@ -293,15 +415,24 @@ shinyServer(function(input, output) {
   ### Graph visualization
   output$adjGraph = renderPlot({
     thisAdj = adjMat();
+    patAdjDf = getPatAdjList( input$targetPatients, input$nDisplay );
 
     patientGraph =  graph.adjacency(thisAdj, mode="directed", weighted=TRUE);
-    #    x = plot.igraph(patientGraph, edge.arrow.size=input$arrowSize, vertex.size = input$vertexSize, vertex.label.cex = input$labelSize);
 
-    thisLayout = layout.kamada.kawai( patientGraph );
+    # Create a color ramp function between blue and red
+    red2blue = colorRampPalette(c('red','blue'))
+    theseColors = red2blue( max(patAdjDf$distance) + 1 );
+    graphColors = theseColors[ patAdjDf$distance + 1 ];
+    patAdjDf$colors = graphColors;
+
+#    thisLayout = layout.kamada.kawai( patientGraph );
+
+    # Set graph color attribute
+    V(patientGraph)$color = patAdjDf$color[ match( V(patientGraph)$name, patAdjDf$patient ) ];
 
     x = plot.igraph(patientGraph,
                     vertex.label=V(patientGraph)$name,
-                    layout=thisLayout,
+#                    layout=thisLayout,
                     vertex.label.color="black",
                     edge.color="black",
                     edge.width=E(patientGraph)$weight*input$weightCoeff,
@@ -320,57 +451,125 @@ shinyServer(function(input, output) {
     roomList = input$roomList;
     thisDf   = patDf[ patDf$patient %in% patList, ];
     thisDf   = thisDf[ thisDf$place %in% roomList, ];
+    thisDf$date = max(thisDf$date) - thisDf$date + 1;
     thisDf$nDate = thisDf$date + 1;
 
     ggplot(thisDf, aes(colour=patient)) +
       geom_segment(aes(x=date, xend=nDate, y=place, yend=place), size=3) +
-      xlab("Dates")
+      xlab("Dates") +
+      scale_x_continuous(breaks=seq(0, 30, 1))  # Ticks from 0-10, every .25
   })
 
   ### Room summary
 
   ### Adjacency matrix
-  output$adjDisplay = renderPlot({
-    # Define the graph
+  graph = reactive({
+    thisAdj = patMat();
+    thisAdj[ thisAdj > input$nDays ] = 0;
+    thisAdj[ thisAdj > 0 ] = 1/thisAdj[ thisAdj > 0];
+
+    thisAdj = thisAdj[ apply( thisAdj, 1, sum) > 0, apply( thisAdj, 1, sum) > 0 ];
+
+    thisAdj[ row(thisAdj) == col(thisAdj) ] = 0;
+
+
     patientGraph =  graph.adjacency(thisAdj, mode="directed", weighted=TRUE)
 
     ### Shamelessly stolen
     ### http://matthewlincoln.net/2014/12/20/adjacency-matrix-plots-with-r-and-ggplot2.html
     # Calculate various network properties, adding them as attributes
     # to each node/vertex
-    V(patientGraph)$comm <- membership(optimal.community(patientGraph));
+#    V(patientGraph)$multilevel_comm <- membership(multilevel.community(patientGraph, weights = E(patientGraph)$weight));
     V(patientGraph)$degree <- degree(patientGraph);
     V(patientGraph)$closeness <- centralization.closeness(patientGraph)$res;
     V(patientGraph)$betweenness <- centralization.betweenness(patientGraph)$res;
     V(patientGraph)$eigen <- centralization.evcent(patientGraph)$vector;
+    V(patientGraph)$optimal_comm <- membership(optimal.community(patientGraph));
+    V(patientGraph)$walktrap_comm <- membership(walktrap.community(patientGraph));
+    V(patientGraph)$edge_comm <- membership(edge.betweenness.community(patientGraph));
 
-    # Re-generate dataframes for both nodes and edges, now containing
-    # calculated network attributes
-    node_list <- get.data.frame(patientGraph, what = "vertices")
+    return( patientGraph );
+  })
 
-    # Determine a community for each edge. If two nodes belong to the
-    # same community, label the edge with that community. If not,
-    # the edge community value is 'NA'
-    edge_list <- get.data.frame(patientGraph, what = "edges") %>%
-      inner_join(node_list %>% select(name, comm), by = c("from" = "name")) %>%
-      inner_join(node_list %>% select(name, comm), by = c("to" = "name")) %>%
-      mutate(group = ifelse(comm.x == comm.y, comm.x, NA) %>% factor())
+  node_list = reactive({
+    get.data.frame(graph(), what = "vertices")
+  })
 
-    # Create a character vector of node names sorted by their
-    # community membership. Here, I rearrange the node_list
-    # table by the "comm" variable, then extract the
-    # "name" vector
-    name_order <- (node_list %>% arrange(comm))$name
+  edge_list = reactive({
+    get.data.frame(graph(), what = "edges")
+  })
 
-    # Reorder edge_list "from" and "to" factor levels based on
-    # this new name_order
-    plot_data <- edge_list %>% mutate(
+  # List non-calculated node attributes
+  annotate_vars <- reactive({
+
+    dataset_names <- names(node_list())
+
+    base <- c(
+      "name",
+      "degree",
+      "closeness",
+      "betweenness",
+      "eigen",
+      "walktrap_comm",
+      "edge_comm",
+      "optimal_comm",
+      "spinglass_comm",
+      "fastgreedy_comm",
+      "multilevel_comm"
+    )
+
+    return(setdiff(dataset_names, base))
+
+  })
+
+  annotatable <- reactive({
+    return(input$arr_var %in% annotate_vars())
+  })
+
+  output$annotate_vars <- reactive({annotatable()})
+  outputOptions(output, "annotate_vars", suspendWhenHidden = FALSE)
+
+
+  # Returns a character vector of the vertices ordered based on given variables
+  ordering <- reactive({
+    if(input$arr_var == "community") {
+      return((node_list() %>% arrange_(input$comm_var))$name)
+    } else {
+      return((node_list() %>% arrange_(input$arr_var))$name)
+    }
+  })
+
+  # Determine a community for each edge. If two nodes belong to the
+  # same community, label the edge with that community. If not,
+  # the edge community value is 'NA'
+  coloring <- reactive({
+    colored_edges <- edge_list() %>%
+      inner_join(node_list() %>% select_("name", "community" = input$comm_var), by = c("from" = "name")) %>%
+      inner_join(node_list() %>% select_("name", "community" = input$comm_var), by = c("to" = "name")) %>%
+      mutate(group = ifelse(community.x == community.y, community.x, NA) %>% factor())
+    return(colored_edges)
+  })
+
+  # Sort the edge list based on the given arrangement variable
+  plot_data <- reactive({
+    name_order <- ordering()
+    sorted_data <- coloring() %>% mutate(
       to = factor(to, levels = name_order),
       from = factor(from, levels = name_order))
+    return(sorted_data)
+  })
 
-    # Create the adjacency matrix plot
-    g = ggplot(plot_data, aes(x = from, y = to, fill = group)) +
-      geom_raster() +
+  output$adjDisplay = renderPlot({
+    # Define the graph
+    patientGraph = graph();
+
+    if(input$alpha_weight) {
+      p <- ggplot(plot_data(), aes(x = from, y = to, fill = group, alpha = weight))
+    } else {
+      p <- ggplot(plot_data(), aes(x = from, y = to, fill = group))
+    }
+
+    p <- p + geom_raster() +
       theme_bw() +
       # Because we need the x and y axis to display every node,
       # not just the nodes that have connections to each other,
@@ -379,15 +578,73 @@ shinyServer(function(input, output) {
       scale_y_discrete(drop = FALSE) +
       theme(
         # Rotate the x-axis lables so they are legible
-        axis.text.x = element_text(angle = 270, hjust = 0),
+        axis.text.x = element_text(angle = 270, hjust = 0, size = 12),
+        axis.text.y = element_text(size = 12),
         # Force the plot into a square aspect ratio
         aspect.ratio = 1,
         # Hide the legend (optional)
-        legend.position = "none");
+        legend.position = "bottom")
 
-    return(g);
+    # Annotate the plot based on preexisting node attributes
+    if(annotatable() & input$ann_var) {
 
+      # Determine the "first" and "last" members of a node group
+      ordered_anns <- node_list() %>%
+        group_by_(input$arr_var) %>%
+        summarize(min = first(name), max = last(name)) %>%
+        filter(min != max)
+
+      ann_groups <- ordered_anns[[input$arr_var]]
+
+      # For each node grouping, add an annotation layer
+      for(val in ann_groups[!is.na(ann_groups)]) {
+
+        # Retrieve the min and max value for the given group value
+        ann_min <- ordered_anns[ordered_anns[, input$arr_var] == val, ][["min"]]
+        ann_max <- ordered_anns[ordered_anns[, input$arr_var] == val, ][["max"]]
+
+        p <- p + annotate(
+          "rect",
+          xmin = ann_min,
+          xmax = ann_max,
+          ymin = ann_min,
+          ymax = ann_max,
+          alpha = .1) +
+          annotate(
+            "text",
+            label = val,
+            x = ann_min,
+            y = ann_max,
+            hjust = 0
+          )
+      }
+    }
+
+    return(p)
   })
+
+
+  ### Build output options
+  hPx = reactive({
+    sprintf("%dpx",input$heightPixels)
+  });
+
+  wPx = reactive({
+    sprintf("%dpx",input$widthPixels)
+  });
+
+  output$adjDisplayOutput <- renderUI({
+    plotOutput(outputId = "adjDisplay", width=wPx(), height=hPx())
+  });
+
+  output$patDisplayOutput <- renderUI({
+    plotOutput(outputId = "patSummary", width=wPx(), height=hPx())
+  });
+
+  output$graphDisplayOutput <- renderUI({
+    plotOutput(outputId = "adjGraph", width=wPx(), height=hPx())
+  });
+
 
 
 })
